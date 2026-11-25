@@ -64,7 +64,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q numpy huggingface_hub
+      - run: pip install -q numpy regex huggingface_hub
       - name: Merge and publish
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
