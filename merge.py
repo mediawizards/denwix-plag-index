@@ -19,6 +19,19 @@ REC = np.dtype([("fp", "<u8"), ("doc", "<u4")])
 PER = (1 << BB) // PARTS
 
 
+
+def retry(fn, *a, **k):
+    """HF answers 429 when many commits land at once: wait and try again."""
+    import time
+    for i in range(15):
+        try:
+            return fn(*a, **k)
+        except Exception as e:  # noqa: BLE001
+            if i == 14 or not any(s in str(e) for s in ("429", "Too Many", "rate", "502", "503", "504", "timed out")):
+                raise
+            print("HF busy, retry in", 60 * (i + 1), "s:", str(e)[:120], flush=True)
+            time.sleep(60 * (i + 1))
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("lang"); ap.add_argument("--local"); ap.add_argument("--no-upload", action="store_true")
@@ -58,7 +71,7 @@ def main():
         del rec, o, bucket, keep, sk, order
         print(f"part {p:02d}: {len(files)} shards, total {total} {time.time()-t0:.0f}s", flush=True)
         if not a.no_upload:
-            api.upload_file(path_or_fileobj=fn, path_in_repo=f"v2/{a.lang}/fp-{p:02d}.bin", repo_id=REPO,
+            retry(api.upload_file, path_or_fileobj=fn, path_in_repo=f"v2/{a.lang}/fp-{p:02d}.bin", repo_id=REPO,
                             repo_type="dataset", commit_message=f"{a.lang} part {p:02d}")
             os.remove(fn)
             shutil.rmtree("stage", ignore_errors=True)
@@ -68,7 +81,7 @@ def main():
     offsets.astype("<u4").tofile(f"{out}/offsets.bin")
     src = a.local or "stage"
     shards = sorted({os.path.basename(os.path.dirname(f)) for f in glob.glob(f"{src}/staging/{a.lang}/*/p00.bin")}) if a.local else \
-        sorted({x.split("/")[2] for x in api.list_repo_files(REPO, repo_type="dataset") if x.startswith(f"staging/{a.lang}/")})
+        sorted({x.split("/")[2] for x in retry(api.list_repo_files, REPO, repo_type="dataset") if x.startswith(f"staging/{a.lang}/")})
     meta = {"version": 2, "lang": a.lang, "source": f"wikipedia-{a.lang} 20231101", "k": K, "w": W, "bb": BB,
             "parts": PARTS, "records": int(total),
             "part_starts": [int(offsets[p * PER]) for p in range(PARTS)], "dropped_common": dropped, "max_df": MAX_DF,
@@ -78,9 +91,9 @@ def main():
     print(meta, flush=True)
     if not a.no_upload:
         for f in ("offsets.bin", "meta.json"):
-            api.upload_file(path_or_fileobj=f"{out}/{f}", path_in_repo=f"v2/{a.lang}/{f}", repo_id=REPO,
+            retry(api.upload_file, path_or_fileobj=f"{out}/{f}", path_in_repo=f"v2/{a.lang}/{f}", repo_id=REPO,
                             repo_type="dataset", commit_message=f"{a.lang} {f}")
-        api.delete_folder(path_in_repo=f"staging/{a.lang}", repo_id=REPO, repo_type="dataset",
+        retry(api.delete_folder, path_in_repo=f"staging/{a.lang}", repo_id=REPO, repo_type="dataset",
                           commit_message=f"{a.lang}: drop staging")
 
 

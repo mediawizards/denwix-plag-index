@@ -19,6 +19,19 @@ PARTS = 16
 REC = np.dtype([("fp", "<u8"), ("doc", "<u4")])
 
 
+
+def retry(fn, *a, **k):
+    """HF answers 429 when many commits land at once: wait and try again."""
+    import time
+    for i in range(15):
+        try:
+            return fn(*a, **k)
+        except Exception as e:  # noqa: BLE001
+            if i == 14 or not any(s in str(e) for s in ("429", "Too Many", "rate", "502", "503", "504", "timed out")):
+                raise
+            print("HF busy, retry in", 60 * (i + 1), "s:", str(e)[:120], flush=True)
+            time.sleep(60 * (i + 1))
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("lang"); ap.add_argument("shard", type=int); ap.add_argument("file")
@@ -63,7 +76,7 @@ def main():
         api = HfApi()
         for attempt in range(6):
             try:
-                api.upload_folder(folder_path=out, repo_id=REPO, repo_type="dataset",
+                retry(api.upload_folder, folder_path=out, repo_id=REPO, repo_type="dataset",
                                   commit_message=f"{a.lang} shard {sd}")
                 break
             except Exception as e:  # concurrent commits from other jobs: back off and retry
