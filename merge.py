@@ -70,7 +70,8 @@ def main():
     shards = sorted({os.path.basename(os.path.dirname(f)) for f in glob.glob(f"{src}/staging/{a.lang}/*/p00.bin")}) if a.local else \
         sorted({x.split("/")[3] for x in api.list_repo_files(REPO, repo_type="dataset") if x.startswith(f"staging/{a.lang}/")})
     meta = {"version": 2, "lang": a.lang, "source": f"wikipedia-{a.lang} 20231101", "k": K, "w": W, "bb": BB,
-            "parts": PARTS, "records": int(total), "dropped_common": dropped, "max_df": MAX_DF,
+            "parts": PARTS, "records": int(total),
+            "part_starts": [int(offsets[p * PER]) for p in range(PARTS)], "dropped_common": dropped, "max_df": MAX_DF,
             "shards": [int(s) for s in shards], "built": time.strftime("%Y-%m-%d"),
             "url": f"https://{a.lang}.wikipedia.org/wiki/{{title}}"}
     json.dump(meta, open(f"{out}/meta.json", "w"), indent=1)
