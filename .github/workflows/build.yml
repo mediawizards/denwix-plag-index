@@ -1,0 +1,72 @@
+name: Build plagiarism index
+
+on:
+  workflow_dispatch:
+    inputs:
+      lang:
+        description: "Wikipedia language (en, es, de, fr, it, ar)"
+        required: true
+        default: "en"
+      max_shards:
+        description: "0 = every shard; a small number makes a quick test index"
+        required: true
+        default: "0"
+
+concurrency:
+  group: index-${{ inputs.lang }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q huggingface_hub
+      - id: plan
+        run: python plan.py "${{ inputs.lang }}" "${{ inputs.max_shards }}"
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q numpy pyarrow regex huggingface_hub
+      - name: Fingerprint shard ${{ matrix.shard }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+        run: python build_shard.py "${{ inputs.lang }}" "${{ matrix.shard }}" "${{ matrix.file }}"
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q numpy huggingface_hub
+      - name: Merge and publish
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+        run: python merge.py "${{ inputs.lang }}"
